@@ -1,1054 +1,527 @@
+# -*- coding: utf-8 -*-
 import csv
+import json
 import re
 import time
 from pathlib import Path
 
-from playwright.sync_api import (
-    sync_playwright,
-    TimeoutError as PlaywrightTimeoutError
-)
+from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 
+CDP_URL = "http://127.0.0.1:9222"
+MARKETPLACE_URL = "https://www.facebook.com/marketplace/you/selling"
 
-# ============================================================
-# CONFIGURACIÓN
-# ============================================================
+BASE = Path(__file__).resolve().parent
+CSV_SALIDA = BASE / "Facebook_Marketplace.csv"
+JSON_SALIDA = BASE / "Facebook_Marketplace.json"
 
-FACEBOOK_URL = "https://www.facebook.com/marketplace/you/selling"
-
-
-# Cuánto desplazamos cada vez
-SCROLL_PIXELS = 1100
-
-# Tiempo entre scrolls
-SCROLL_WAIT = 1.2
-
-# Cantidad de ciclos sin encontrar productos nuevos
-# antes de asumir que llegamos al final.
-MAX_SIN_NUEVOS = 7
-
-
-# ============================================================
-# CSV
-# ============================================================
+PAUSA_ENTRE_PRODUCTOS = 0.35
+PAUSA_SCROLL = 0.45
+MAX_SCROLLS = 80
+TIMEOUT_MODAL = 5000
 
 CAMPOS = [
-    "SKU",
+    "nombre",
+    "precio",
+    "disponibilidad",
+    "sku",
+    "publicado",
     "listing_id",
-    "Nombre",
-    "Precio",
-    "Disponibilidad"
 ]
 
 
-def cargar_existentes():
-
-    existentes = set()
-
-    if not CSV_FILE.exists():
-        return existentes
-
-    try:
-
-        with open(
-            CSV_FILE,
-            "r",
-            encoding="utf-8-sig",
-            newline=""
-        ) as archivo:
-
-            lector = csv.DictReader(
-                archivo,
-                delimiter=";"
-            )
-
-            for fila in lector:
-
-                listing_id = (
-                    fila.get("listing_id") or ""
-                ).strip()
-
-                if listing_id:
-                    existentes.add(listing_id)
-
-    except Exception as e:
-
-        print(
-            f"[AVISO] No se pudo leer CSV existente: {e}"
-        )
-
-    return existentes
-
-
-def guardar_registro(registro):
-
-    existe = CSV_FILE.exists()
-
-    with open(
-        CSV_FILE,
-        "a",
-        encoding="utf-8-sig",
-        newline=""
-    ) as archivo:
-
-        escritor = csv.DictWriter(
-            archivo,
-            fieldnames=CAMPOS,
-            delimiter=";"
-        )
-
-        if not existe:
-            escritor.writeheader()
-
-        escritor.writerow(registro)
-
-        archivo.flush()
-
-
-# ============================================================
-# EXTRACCIÓN
-# ============================================================
-
-def extraer_precio(texto):
-
+def limpiar_texto(texto):
     if not texto:
         return ""
-
     texto = texto.replace("\xa0", " ")
-
-    # Ejemplos:
-    # S/693
-    # S/ 693
-    # S/1,299
-    # S/ 1,299.50
-
-    match = re.search(
-        r"S\/\s*([\d.,]+)",
-        texto
+    return "\n".join(
+        re.sub(r"\s+", " ", x).strip()
+        for x in texto.replace("\r", "\n").split("\n")
+        if x.strip()
     )
 
-    if not match:
-        return ""
 
-    return match.group(1).strip()
+def precios(texto):
+    return [
+        x.replace(",", "")
+        for x in re.findall(r"S/\s*([\d.,]+)", texto or "", re.I)
+    ]
 
 
-def extraer_sku(texto):
+def precio(texto):
+    p = precios(texto)
+    return p[0] if p else ""
 
-    if not texto:
-        return ""
 
-    texto = texto.replace("\xa0", " ")
-
-    # Estructura observada:
-    #
-    # 3023
-    # Publicación:
-    #
-    match = re.search(
-        r"(?:^|\n)\s*(\d+)\s*\n\s*Publicación\s*:",
-        texto,
-        re.IGNORECASE
-    )
-
-    if match:
-        return match.group(1)
-
+def disponibilidad(texto):
+    if re.search(r"\bDisponible\b", texto or "", re.I):
+        return "Disponible"
+    if re.search(r"\bAgotado\b", texto or "", re.I):
+        return "Agotado"
     return ""
 
 
-def extraer_listing_id(modal):
-
-    try:
-
-        enlaces = modal.locator(
-            'a[href*="listing_id="]'
-        )
-
-        cantidad = enlaces.count()
-
-        for i in range(cantidad):
-
-            try:
-
-                href = enlaces.nth(i).get_attribute(
-                    "href"
-                )
-
-                if not href:
-                    continue
-
-                match = re.search(
-                    r"listing_id=(\d+)",
-                    href
-                )
-
-                if match:
-                    return match.group(1)
-
-            except Exception:
-                continue
-
-    except Exception:
-        pass
-
+def publicado(texto):
+    for linea in (texto or "").splitlines():
+        linea = linea.strip()
+        if re.search(r"Publicado\s+(el|hace|en)", linea, re.I):
+            return linea
     return ""
 
 
-def extraer_nombre(modal, nombre_tarjeta):
+def sku_desde_modal(texto):
+    lineas = [x.strip() for x in (texto or "").splitlines() if x.strip()]
 
-    # El nombre de la tarjeta ya es confiable.
-    # Lo usamos primero porque Facebook lo entrega
-    # en aria-label.
+    for i, linea in enumerate(lineas):
+        if re.fullmatch(r"Publicación\s*:?", linea, re.I) and i > 0:
+            anterior = lineas[i - 1]
+            if re.fullmatch(r"\d+", anterior):
+                return anterior
 
-    if nombre_tarjeta:
-        return nombre_tarjeta.strip()
+    m = re.search(r"(\d+)\s*Publicación\s*:", texto or "", re.I)
+    return m.group(1) if m else ""
 
-    try:
 
-        texto = modal.inner_text()
+def nombre_desde_texto(texto):
+    lineas = [x.strip() for x in (texto or "").splitlines() if x.strip()]
 
-        lineas = [
-            x.strip()
-            for x in texto.splitlines()
-            if x.strip()
-        ]
-
-        for linea in lineas:
-
-            if linea == "Tu publicación":
-                continue
-
-            if linea.startswith("S/"):
-                continue
-
-            if linea == "Disponible":
-                continue
-
-            if linea == "Agotado":
-                continue
-
-            if "Publicación:" in linea:
-                continue
-
+    for linea in lineas:
+        if re.fullmatch(r"S/\s*[\d.,]+(?:S/\s*[\d.,]+)*", linea, re.I):
+            continue
+        if re.fullmatch(r"\d+", linea):
+            continue
+        if re.search(r"^(Disponible|Agotado)\b", linea, re.I):
+            continue
+        if re.search(r"Publicado\s+(el|hace|en)", linea, re.I):
+            continue
+        if re.search(r"Publicado en Marketplace", linea, re.I):
+            continue
+        if re.search(r"clics?\s+en\s+la publicación", linea, re.I):
+            continue
+        if len(linea) >= 3:
             return linea
 
-    except Exception:
-        pass
-
     return ""
 
 
-def extraer_disponibilidad(texto):
-
-    if not texto:
-        return ""
-
-    texto = texto.replace("\xa0", " ")
-
-    if re.search(
-        r"\bDisponible\b",
-        texto,
-        re.IGNORECASE
-    ):
-        return "Disponible"
-
-    if re.search(
-        r"\bAgotado\b",
-        texto,
-        re.IGNORECASE
-    ):
-        return "Agotado"
-
-    # En tu modal aparece:
-    #
-    # Marcar como agotado
-    #
-    # Esto significa que actualmente está disponible.
-
-    if re.search(
-        r"Marcar como agotado",
-        texto,
-        re.IGNORECASE
-    ):
-        return "Disponible"
-
-    return ""
+def normalizar(nombre):
+    return re.sub(r"\s+", " ", nombre or "").strip().lower()
 
 
-# ============================================================
-# MODAL
-# ============================================================
+def cargar_registros():
+    if not CSV_SALIDA.exists():
+        return []
 
-def obtener_modal(page):
-
-    modal = page.locator(
-        '[aria-label="Tu publicación"]'
-    )
-
+    registros = []
     try:
+        with open(CSV_SALIDA, "r", encoding="utf-8-sig", newline="") as f:
+            for fila in csv.DictReader(f):
+                registros.append({c: fila.get(c, "") for c in CAMPOS})
+    except Exception as e:
+        print("Aviso leyendo CSV anterior:", e)
 
-        modal.wait_for(
-            state="visible",
-            timeout=7000
-        )
-
-        return modal
-
-    except PlaywrightTimeoutError:
-
-        return None
+    return registros
 
 
-def cerrar_modal(page):
+def guardar(registros):
+    # Un registro por SKU cuando existe.
+    por_sku = {}
+    sin_sku = []
 
-    # ESC es la forma más rápida.
-    try:
+    for r in registros:
+        s = str(r.get("sku", "")).strip()
+        if s:
+            por_sku[s] = r
+        else:
+            sin_sku.append(r)
 
-        page.keyboard.press("Escape")
+    finales = list(por_sku.values()) + sin_sku
 
-        page.wait_for_timeout(300)
+    with open(CSV_SALIDA, "w", encoding="utf-8-sig", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=CAMPOS)
+        w.writeheader()
+        w.writerows(finales)
 
-    except Exception:
-        pass
-
-    # Comprobar que realmente desapareció.
-    try:
-
-        modal = page.locator(
-            '[aria-label="Tu publicación"]'
-        )
-
-        if modal.count() > 0:
-
-            try:
-
-                modal.wait_for(
-                    state="hidden",
-                    timeout=1500
-                )
-
-            except Exception:
-
-                # Intentar botón cerrar
-                botones = page.locator(
-                    '[aria-label="Tu publicación"] '
-                    'button[aria-label="Cerrar"]'
-                )
-
-                if botones.count() > 0:
-
-                    try:
-                        botones.first.click(
-                            timeout=1000
-                        )
-                    except Exception:
-                        pass
-
-    except Exception:
-        pass
-
-    page.wait_for_timeout(250)
+    with open(JSON_SALIDA, "w", encoding="utf-8") as f:
+        json.dump(finales, f, ensure_ascii=False, indent=2)
 
 
-# ============================================================
-# TARJETAS
-# ============================================================
-
-def obtener_tarjetas(page):
-
+def detectar_tarjetas(page):
     """
-    Busca las tarjetas de productos.
-
-    La estructura que comprobamos en tu Marketplace es:
-
-        div[role="button"][aria-label]
-
-    y el aria-label contiene el nombre del producto.
-
-    Excluimos elementos relacionados con el modal.
+    No usa clases x... de Facebook.
+    Busca img[alt] y sube por sus padres hasta hallar
+    un bloque pequeño que contenga precio + estado.
     """
+    resultado = []
+    firmas = set()
 
     try:
-
-        elementos = page.locator(
-            'div[role="button"][aria-label]'
-        )
-
-        cantidad = elementos.count()
-
-        tarjetas = []
+        imagenes = page.locator("img[alt]")
+        cantidad = imagenes.count()
+        print("Imágenes encontradas:", cantidad)
 
         for i in range(cantidad):
-
             try:
+                img = imagenes.nth(i)
+                alt = (img.get_attribute("alt") or "").strip()
 
-                elemento = elementos.nth(i)
-
-                aria = (
-                    elemento.get_attribute(
-                        "aria-label"
-                    ) or ""
-                ).strip()
-
-                if not aria:
+                if not alt:
                     continue
 
-                # No queremos botones del modal.
-                if aria in [
-                    "Tu publicación",
-                    "Cerrar"
-                ]:
-                    continue
-
-                # Las tarjetas reales contienen una imagen
-                # con alt igual al nombre.
-                imagenes = elemento.locator(
-                    "img[alt]"
-                )
-
-                if imagenes.count() == 0:
-                    continue
-
-                # La tarjeta también debe contener un precio.
-                texto = elemento.inner_text()
-
-                if not re.search(
-                    r"S\/\s*[\d.,]+",
-                    texto
+                if any(
+                    x in alt.lower()
+                    for x in ("facebook", "marketplace", "avatar", "perfil", "logo", "icon")
                 ):
                     continue
 
-                tarjetas.append(elemento)
+                candidato = None
+                texto = ""
+
+                for nivel in range(2, 10):
+                    try:
+                        padre = img.locator("xpath=" + "/.." * nivel)
+                        if padre.count() == 0:
+                            continue
+
+                        t = limpiar_texto(padre.inner_text(timeout=800))
+
+                        if not t or len(t) > 1600:
+                            continue
+
+                        if not re.search(r"S/\s*[\d.,]+", t, re.I):
+                            continue
+
+                        if not re.search(r"Disponible|Agotado|Publicado", t, re.I):
+                            continue
+
+                        n = nombre_desde_texto(t) or alt
+                        if not n:
+                            continue
+
+                        candidato = padre
+                        texto = t
+                        break
+                    except Exception:
+                        pass
+
+                if candidato is None:
+                    continue
+
+                nombre = nombre_desde_texto(texto) or alt
+                p = precio(texto)
+                firma = (normalizar(nombre), p)
+
+                if firma in firmas:
+                    continue
+
+                firmas.add(firma)
+                resultado.append({
+                    "locator": candidato,
+                    "nombre": nombre,
+                    "precio": p,
+                })
 
             except Exception:
-                continue
-
-        return tarjetas
-
-    except Exception:
-
-        return []
-
-
-# ============================================================
-# PROCESAR TARJETA
-# ============================================================
-
-def procesar_tarjeta(
-    page,
-    tarjeta,
-    nombre_tarjeta
-):
-
-    print()
-    print("--------------------------------------------")
-    print("PRODUCTO")
-    print(nombre_tarjeta)
-
-    try:
-
-        # Click en la tarjeta
-        tarjeta.click(
-            timeout=5000
-        )
+                pass
 
     except Exception as e:
+        print("Error detectando tarjetas:", e)
 
-        print(
-            "[ERROR] No se pudo abrir la tarjeta:",
-            e
-        )
+    return resultado
 
-        return None
 
-    # Esperar modal real
-    modal = obtener_modal(page)
+def cargar_todo(page):
+    print("\nCargando publicaciones...\n")
 
-    if modal is None:
+    ultimo = -1
+    sin_cambios = 0
 
-        print(
-            "[ERROR] No apareció 'Tu publicación'."
-        )
+    for vuelta in range(1, MAX_SCROLLS + 1):
+        try:
+            actual = page.locator("img[alt]").count()
+        except Exception:
+            actual = 0
 
-        cerrar_modal(page)
+        print(f"Scroll {vuelta:02d} | imágenes DOM: {actual}")
 
-        return None
+        if actual == ultimo:
+            sin_cambios += 1
+        else:
+            sin_cambios = 0
+            ultimo = actual
+
+        if sin_cambios >= 5:
+            break
+
+        try:
+            page.mouse.wheel(0, 1300)
+        except Exception:
+            break
+
+        time.sleep(PAUSA_SCROLL)
 
     try:
+        page.evaluate("window.scrollTo(0,0)")
+    except Exception:
+        pass
 
-        # Dar un pequeño margen al renderizado interno.
-        page.wait_for_timeout(250)
+    time.sleep(0.5)
 
-        texto = modal.inner_text()
 
-        # --------------------------------------------
-        # DATOS
-        # --------------------------------------------
+def obtener_modal(page):
+    selectores = [
+        '[role="dialog"][aria-label="Tu publicación"]',
+        '[aria-label="Tu publicación"][role="dialog"]',
+    ]
 
-        sku = extraer_sku(texto)
+    for selector in selectores:
+        try:
+            loc = page.locator(selector)
+            if loc.count():
+                modal = loc.last
+                if modal.is_visible(timeout=500):
+                    return modal
+        except Exception:
+            pass
 
-        precio = extraer_precio(texto)
+    try:
+        loc = page.locator('[role="dialog"]')
+        if loc.count():
+            return loc.last
+    except Exception:
+        pass
 
-        listing_id = extraer_listing_id(
-            modal
-        )
+    return None
 
-        nombre = extraer_nombre(
-            modal,
-            nombre_tarjeta
-        )
 
-        disponibilidad = (
-            extraer_disponibilidad(texto)
-        )
+def cerrar_modal(page):
+    try:
+        page.keyboard.press("Escape")
+        time.sleep(0.2)
+    except Exception:
+        pass
 
-        resultado = {
-            "SKU": sku,
-            "listing_id": listing_id,
-            "Nombre": nombre,
-            "Precio": precio,
-            "Disponibilidad": disponibilidad
+
+def listing_id_modal(modal):
+    try:
+        links = modal.locator('[href*="listing_id="]')
+        for i in range(links.count()):
+            href = links.nth(i).get_attribute("href") or ""
+            m = re.search(r"listing_id[=%3D]+(\d+)", href, re.I)
+            if m:
+                return m.group(1)
+    except Exception:
+        pass
+
+    try:
+        html = modal.inner_html()
+        m = re.search(r"listing_id.{0,100}?(\d{8,})", html, re.I)
+        if m:
+            return m.group(1)
+    except Exception:
+        pass
+
+    return ""
+
+
+def extraer_publicacion(page, info):
+    nombre_tarjeta = info["nombre"]
+    precio_tarjeta = info["precio"]
+
+    print("\n--------------------------------------------")
+    print("Abriendo:", nombre_tarjeta)
+
+    try:
+        info["locator"].scroll_into_view_if_needed(timeout=3000)
+        time.sleep(0.1)
+        info["locator"].click(timeout=3000)
+    except Exception:
+        try:
+            info["locator"].locator("img[alt]").first.click(timeout=3000)
+        except Exception as e:
+            print("No se pudo abrir:", e)
+            return {
+                "nombre": nombre_tarjeta,
+                "precio": precio_tarjeta,
+                "disponibilidad": "",
+                "sku": "",
+                "publicado": "",
+                "listing_id": "",
+            }
+
+    try:
+        modal = page.locator(
+            '[role="dialog"][aria-label="Tu publicación"]'
+        ).last
+        modal.wait_for(state="visible", timeout=TIMEOUT_MODAL)
+    except Exception:
+        modal = obtener_modal(page)
+
+    if not modal:
+        print("No apareció el modal.")
+        cerrar_modal(page)
+        return {
+            "nombre": nombre_tarjeta,
+            "precio": precio_tarjeta,
+            "disponibilidad": "",
+            "sku": "",
+            "publicado": "",
+            "listing_id": "",
         }
 
-        print()
-        print("SKU:", sku)
-        print("Listing ID:", listing_id)
-        print("Precio:", precio)
-        print("Disponibilidad:", disponibilidad)
+    try:
+        texto = limpiar_texto(modal.inner_text(timeout=2000))
+    except Exception:
+        texto = ""
 
-        if not sku:
-            print(
-                "[AVISO] No se pudo extraer SKU."
-            )
+    s = sku_desde_modal(texto)
+    ps = precios(texto)
 
-        if not listing_id:
-            print(
-                "[AVISO] No se pudo extraer listing_id."
-            )
+    r = {
+        "nombre": nombre_desde_texto(texto) or nombre_tarjeta,
+        "precio": ps[0] if ps else precio_tarjeta,
+        "disponibilidad": disponibilidad(texto),
+        "sku": s,
+        "publicado": publicado(texto),
+        "listing_id": listing_id_modal(modal),
+    }
 
-        return resultado
+    print(json.dumps(r, ensure_ascii=False, indent=2))
 
-    except Exception as e:
+    cerrar_modal(page)
+    time.sleep(PAUSA_ENTRE_PRODUCTOS)
 
-        print(
-            "[ERROR] Extrayendo datos:",
-            e
-        )
+    return r
 
-        return None
-
-    finally:
-
-        cerrar_modal(page)
-
-
-# ============================================================
-# MAIN
-# ============================================================
 
 def main():
-
-    print()
-    print("============================================")
+    print("\n============================================")
     print(" EXTRACTOR FACEBOOK MARKETPLACE")
-    print("============================================")
-    print()
+    print("============================================\n")
 
-    print("Perfil de extracción:")
-    print(CHROME_USER_DATA)
-    # --------------------------------------------
-    # Cargar registros anteriores
-    # --------------------------------------------
+    registros = cargar_registros()
+    print("Registros existentes:", len(registros))
 
-    listing_ids_existentes = (
-        cargar_existentes()
-    )
-
-    print()
-
-    if listing_ids_existentes:
-
-        print(
-            "Registros existentes:",
-            len(listing_ids_existentes)
-        )
-
-    else:
-
-        print(
-            "No hay registros anteriores."
-        )
-
-    # --------------------------------------------
-    # Playwright
-    # --------------------------------------------
+    nombres_existentes = {
+        normalizar(x.get("nombre", ""))
+        for x in registros
+        if x.get("nombre")
+    }
 
     with sync_playwright() as p:
-
-        print()
-        print("Iniciando Chrome...")
+        print("Conectando al Chrome existente...")
 
         try:
-
-                context = p.chromium.launch_persistent_context(
-                user_data_dir=CHROME_USER_DATA,
-                headless=False,
-                args=[
-                    "--start-maximized",
-                    "--no-first-run",
-                    "--no-default-browser-check"
-                ],
-                viewport=None,
-                record_video_dir=None
-                  )
-
+            browser = p.chromium.connect_over_cdp(CDP_URL)
         except Exception as e:
-
-            print()
-            print("============================================")
-            print("ERROR ABRIENDO EL PERFIL DE CHROME")
-            print("============================================")
-            print()
+            print("\nNO SE PUDO CONECTAR AL CHROME.")
+            print("Inicia Chrome con --remote-debugging-port=9222")
             print(e)
-            print()
-            print(
-                "Asegúrate de que Chrome esté completamente cerrado."
-            )
-
-            input(
-                "\nPresiona ENTER para salir..."
-            )
-
+            input("\nENTER para salir...")
             return
 
-     # --------------------------------------------
-        # Página
-        # --------------------------------------------
+        print("Chrome conectado correctamente.")
 
-        if context.pages:
+        page = None
 
-            page = context.pages[0]
+        for context in browser.contexts:
+            for pestaña in context.pages:
+                try:
+                    if "facebook.com" in pestaña.url.lower():
+                        page = pestaña
+                        if "marketplace/you/selling" in pestaña.url.lower():
+                            break
+                except Exception:
+                    pass
+            if page and "marketplace/you/selling" in page.url.lower():
+                break
 
-        else:
+        if page is None:
+            for context in browser.contexts:
+                if context.pages:
+                    page = context.pages[0]
+                    break
 
-            page = context.new_page()
+        if page is None:
+            print("No hay pestañas disponibles.")
+            input("\nENTER para salir...")
+            return
 
-        print()
-        print("Página inicial:")
+        print("Página seleccionada:")
         print(page.url)
 
+        if "marketplace/you/selling" not in page.url.lower():
+            print("Abriendo Marketplace...")
+            try:
+                page.goto(
+                    MARKETPLACE_URL,
+                    wait_until="domcontentloaded",
+                    timeout=30000,
+                )
+            except Exception as e:
+                print("Aviso:", e)
 
-        # --------------------------------------------
-        # Reducir recursos innecesarios
-        # --------------------------------------------
+        print("Esperando Marketplace...")
+        page.wait_for_timeout(1200)
 
-        def controlar_recursos(route):
-
-            tipo = route.request.resource_type
-
-            # Bloqueamos únicamente recursos pesados
-            # que no necesitamos para extraer los datos.
-            #
-            # NO bloqueamos imágenes porque las tarjetas
-            # utilizan img[alt] para identificarse.
-
-            if tipo in [
-                "media",
-                "font"
-            ]:
-
-                route.abort()
-
-            else:
-
-                route.continue_()
-
-
-        page.route(
-            "**/*",
-            controlar_recursos
-        )
-
-        # --------------------------------------------
-        # Facebook
-        # --------------------------------------------
-
-        print()
-        print("Abriendo Facebook...")
-
-        try:
-
-            page.goto(
-                "https://www.facebook.com/",
-                wait_until="domcontentloaded",
-                timeout=60000
-            )
-
-        except Exception as e:
-
-            print()
-            print(
-                "[AVISO] Facebook no terminó la navegación:"
-            )
-
-            print(e)
-
-        page.wait_for_timeout(3000)
-
-        print()
         print("URL actual:")
         print(page.url)
 
-        # --------------------------------------------
-        # LOGIN / SESIÓN
-        # --------------------------------------------
+        cargar_todo(page)
 
-        print()
-        print("--------------------------------------------")
-        print("VERIFICACIÓN DE SESIÓN")
-        print("--------------------------------------------")
+        tarjetas = detectar_tarjetas(page)
 
-        print(
-            "Si Facebook muestra alguna pantalla de"
-        )
-        print(
-            "inicio de sesión, verificación o checkpoint,"
-        )
-        print(
-            "resuélvela manualmente."
-        )
+        print("\n============================================")
+        print("TARJETAS DETECTADAS:", len(tarjetas))
+        print("============================================\n")
 
-        print()
-        print(
-            "Cuando Facebook esté completamente abierto,"
-        )
-        print(
-            "presiona ENTER aquí."
-        )
-
-        input()
-
-        # --------------------------------------------
-        # Marketplace
-        # --------------------------------------------
-
-        print()
-        print("Abriendo tus publicaciones...")
-
-        try:
-
-            page.goto(
-                FACEBOOK_URL,
-                wait_until="domcontentloaded",
-                timeout=60000
-            )
-
-        except Exception as e:
-
-            print()
-            print(
-                "[AVISO] Error de navegación de Marketplace:"
-            )
-
-            print(e)
-
-        page.wait_for_timeout(4000)
-
-        print()
-        print("URL:")
-        print(page.url)
-
-        # --------------------------------------------
-        # Comprobar que Facebook está realmente cargado
-        # --------------------------------------------
-
-        try:
-
-            tarjetas_iniciales = obtener_tarjetas(
-                page
-            )
-
-        except Exception:
-
-            tarjetas_iniciales = []
-
-        print()
-        print(
-            "Tarjetas encontradas inicialmente:",
-            len(tarjetas_iniciales)
-        )
-
-        if not tarjetas_iniciales:
-
-            print()
-            print("============================================")
-            print("NO SE ENCONTRARON PUBLICACIONES")
-            print("============================================")
-            print()
-            print(
-                "Verifica que Facebook esté mostrando:"
-            )
-            print(
-                "Marketplace > Tus publicaciones"
-            )
-            print()
-
-            input(
-                "Presiona ENTER para cerrar..."
-            )
-
-            context.close()
-
+        if not tarjetas:
+            print("No se detectaron tarjetas.")
+            print("La página está abierta, pero el DOM no coincide.")
+            input("\nENTER para salir...")
             return
 
-        # --------------------------------------------
-        # CONTROL
-        # --------------------------------------------
+        procesadas = 0
+        saltadas = 0
 
-        # Firmas de tarjetas ya examinadas.
-        tarjetas_vistas = set()
+        for i, info in enumerate(tarjetas, 1):
+            nombre = info["nombre"]
 
-        # IDs encontrados.
-        listing_ids = set(
-            listing_ids_existentes
-        )
+            print(f"\n[{i}/{len(tarjetas)}]")
 
-        sin_nuevos = 0
+            if normalizar(nombre) in nombres_existentes:
+                print("Ya existe. Se omite para ahorrar recursos.")
+                saltadas += 1
+                continue
 
-        total_guardados = len(
-            listing_ids_existentes
-        )
+            registro = extraer_publicacion(page, info)
+            registros.append(registro)
 
-        # --------------------------------------------
-        # BUCLE
-        # --------------------------------------------
-
-        while True:
-
-            tarjetas = obtener_tarjetas(page)
-
-            print()
-            print("============================================")
-            print(
-                "Tarjetas en DOM:",
-                len(tarjetas)
-            )
-            print(
-                "Productos guardados:",
-                total_guardados
-            )
-            print("============================================")
-
-            nuevos = 0
-
-            # ----------------------------------------
-            # Procesar tarjetas
-            # ----------------------------------------
-
-            for tarjeta in tarjetas:
-
-                try:
-
-                    nombre = (
-                        tarjeta.get_attribute(
-                            "aria-label"
-                        ) or ""
-                    ).strip()
-
-                    if not nombre:
-                        continue
-
-                    # --------------------------------
-                    # Firma de tarjeta
-                    # --------------------------------
-
-                    try:
-
-                        texto_tarjeta = (
-                            tarjeta.inner_text()
-                        )
-
-                    except Exception:
-
-                        texto_tarjeta = ""
-
-                    firma = (
-                        nombre,
-                        texto_tarjeta
-                    )
-
-                    if firma in tarjetas_vistas:
-
-                        continue
-
-                    tarjetas_vistas.add(
-                        firma
-                    )
-
-                    # --------------------------------
-                    # Procesar
-                    # --------------------------------
-
-                    resultado = procesar_tarjeta(
-                        page,
-                        tarjeta,
-                        nombre
-                    )
-
-                    if not resultado:
-
-                        continue
-
-                    listing_id = (
-                        resultado["listing_id"]
-                    )
-
-                    # --------------------------------
-                    # Si ya existe
-                    # --------------------------------
-
-                    if listing_id:
-
-                        if listing_id in listing_ids:
-
-                            print(
-                                "[YA EXISTE] "
-                                "No se vuelve a guardar."
-                            )
-
-                            continue
-
-                        listing_ids.add(
-                            listing_id
-                        )
-
-                    # --------------------------------
-                    # Guardar
-                    # --------------------------------
-
-                    guardar_registro(
-                        resultado
-                    )
-
-                    total_guardados += 1
-                    nuevos += 1
-
-                    print(
-                        "[GUARDADO]",
-                        total_guardados
-                    )
-
-                except Exception as e:
-
-                    print()
-                    print(
-                        "[ERROR TARJETA]",
-                        e
-                    )
-
-                    cerrar_modal(page)
-
-                    continue
-
-            # ----------------------------------------
-            # Control de final
-            # ----------------------------------------
-
-            print()
-            print(
-                "Nuevos en esta vuelta:",
-                nuevos
+            nombres_existentes.add(
+                normalizar(registro.get("nombre", ""))
             )
 
-            if nuevos == 0:
+            # Guardado incremental: si se corta el script,
+            # lo ya extraído queda en el CSV.
+            guardar(registros)
 
-                sin_nuevos += 1
+            procesadas += 1
 
-            else:
+        guardar(registros)
 
-                sin_nuevos = 0
-
-            print(
-                "Vueltas sin nuevos:",
-                sin_nuevos,
-                "/",
-                MAX_SIN_NUEVOS
-            )
-
-            if sin_nuevos >= MAX_SIN_NUEVOS:
-
-                print()
-                print(
-                    "No se detectan publicaciones nuevas."
-                )
-
-                break
-
-            # ----------------------------------------
-            # Scroll
-            # ----------------------------------------
-
-            print()
-            print(
-                "Haciendo scroll..."
-            )
-
-            try:
-
-                page.mouse.wheel(
-                    0,
-                    SCROLL_PIXELS
-                )
-
-            except Exception as e:
-
-                print(
-                    "[ERROR SCROLL]",
-                    e
-                )
-
-            page.wait_for_timeout(
-                int(
-                    SCROLL_WAIT * 1000
-                )
-            )
-
-        # --------------------------------------------
-        # FINAL
-        # --------------------------------------------
-
-        print()
-        print("============================================")
+        print("\n============================================")
         print(" EXTRACCIÓN TERMINADA")
         print("============================================")
-        print()
-        print(
-            "Total guardados:",
-            total_guardados
-        )
-        print()
-        print(
-            "CSV:"
-        )
-        print(
-            CSV_FILE.resolve()
-        )
+        print("Tarjetas:", len(tarjetas))
+        print("Procesadas:", procesadas)
+        print("Saltadas:", saltadas)
+        print("Total:", len(registros))
+        print("\nCSV:")
+        print(CSV_SALIDA)
+        print("\nJSON:")
+        print(JSON_SALIDA)
 
-        print()
-        print(
-            "El archivo está listo para Excel."
-        )
+        input("\nENTER para salir...")
 
-        input(
-            "\nPresiona ENTER para cerrar Chrome..."
-        )
-
-        context.close()
-
-
-# ============================================================
-# EJECUCIÓN
-# ============================================================
 
 if __name__ == "__main__":
     main()
