@@ -1,4 +1,59 @@
-chrome_debug
-perfil_facebook
+# ==========================================
+# FACEBOOK MARKETPLACE EXTRACTOR
+# ==========================================
 
+# ------------------------------------------
+# Sesiones / perfiles de Chrome
+# ------------------------------------------
+chrome_debug/
+perfil_facebook/
+facebook_profile/
+
+# Cualquier perfil de Chrome si aparece
+ChromeProfile/
+chrome_profile/
+
+# ------------------------------------------
+# Datos generados por el extractor
+# ------------------------------------------
 Facebook_Marketplace.xlsx
+Facebook_Marketplace_checkpoint.xlsx
+Facebook_Marketplace.csv
+
+# Excel temporales / backups
+*.xlsx~
+*.xls~
+~$*.xlsx
+~$*.xls
+
+# ------------------------------------------
+# Logs
+# ------------------------------------------
+*.log
+logs/
+*.tmp
+
+# ------------------------------------------
+# Python
+# ------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Entornos virtuales
+.venv/
+venv/
+env/
+ENV/
+
+# ------------------------------------------
+# VS Code
+# ------------------------------------------
+.vscode/
+
+# ------------------------------------------
+# Sistema operativo
+# ------------------------------------------
+Thumbs.db
+.DS_Store
+desktop.ini

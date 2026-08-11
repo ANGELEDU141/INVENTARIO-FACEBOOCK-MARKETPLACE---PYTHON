@@ -1,22 +1,630 @@
-
-ANTES CERRAR TODOS LOS PROCESOR DE CHROME
-/////
-taskkill /F /IM chrome.exe
-/////
-
+============================================================
+FACEBOOK MARKETPLACE - EXTRACTOR V2
+DOCUMENTACIÓN Y MANUAL DE USO
+============================================================
 
 
+DESCRIPCIÓN
+-----------
 
-COMANDO PARA ABRIR EL CHROME QUE USARA EL SCRIPT 
- ///////
-& "C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222 --user-data-dir="C:\Users\compumarker\Desktop\SCRIPS\EXTRACTOR FB\chrome_debug"
+Facebook Marketplace - Extractor V2 es un script desarrollado
+para extraer información de las publicaciones propias de
+Facebook Marketplace y almacenarla en un archivo Excel.
 
-////////
+El script obtiene información como:
 
- - INICIAR SECIÓN 
- - AL EJECUTAR EL SCRIPT ESTE REDIJIRA A LA PAGINA DE PRODUCTOS DE MARKETPLACE PONER LOS ITEMS EN MODO VIÑETAS - NO LISTA
+- Nombre del producto
+- Precio
+- Disponibilidad
+- SKU
+- Listing ID
+- Fecha o antigüedad de publicación
 
-py Facebook_Marketplace_V2.py
+El resultado se almacena en:
 
- - DEJAR QUE EL SCRIPT LEA TODOS LOS PRODUCTOS ( PUEDE ESTANCARSE CON ALGUNOS, SOLO SE TIENE QUE CERRAR LA VIÑETA DEL PRODUCTO Y SEGUIRA)
- 
+    Facebook_Marketplace.xlsx
+
+
+============================================================
+REQUISITOS
+============================================================
+
+Para utilizar el extractor se necesita:
+
+- Windows
+- Python 3
+- Google Chrome
+- Conexión a Internet
+- Una sesión activa de Facebook
+- Playwright
+- OpenPyXL
+
+
+============================================================
+INSTALAR PYTHON
+============================================================
+
+Si Python todavía no está instalado:
+
+- Descargar e instalar Python 3 desde la página oficial:
+
+  https://www.python.org/
+
+- Durante la instalación activar la opción:
+
+  "Add Python to PATH"
+
+- Después de instalarlo comprobar desde PowerShell:
+
+  py --version
+
+Debe aparecer una versión de Python instalada.
+
+
+============================================================
+INSTALAR LAS LIBRERÍAS
+============================================================
+
+Abrir PowerShell dentro de la carpeta del proyecto.
+
+Instalar las librerías utilizadas por el script:
+
+    py -m pip install playwright openpyxl
+
+Las librerías utilizadas son:
+
+- playwright
+  Se utiliza para controlar y leer Google Chrome.
+
+- openpyxl
+  Se utiliza para crear, leer y actualizar los archivos Excel.
+
+
+============================================================
+INSTALAR EL NAVEGADOR DE PLAYWRIGHT
+============================================================
+
+Después de instalar Playwright ejecutar:
+
+    py -m playwright install chromium
+
+Este paso instala los componentes de Chromium necesarios
+para que Playwright pueda trabajar correctamente.
+
+
+============================================================
+ESTRUCTURA DEL PROYECTO
+============================================================
+
+La carpeta principal debe contener como mínimo:
+
+    Facebook_Marketplace_V2.py
+    DOCUMENTACION.TXT
+    .gitignore
+
+También puede contener:
+
+    requirements.txt
+    README.md
+    Formato_reporte.py
+
+
+Durante el funcionamiento se pueden generar archivos como:
+
+    Facebook_Marketplace.xlsx
+    Facebook_Marketplace_checkpoint.xlsx
+
+
+============================================================
+IMPORTANTE SOBRE CHROME
+============================================================
+
+El extractor NO abre un Chrome independiente mediante
+Playwright.
+
+El script se conecta a una instancia de Google Chrome que
+debe iniciarse previamente con Remote Debugging.
+
+El puerto utilizado es:
+
+    9222
+
+
+============================================================
+ANTES DE EJECUTAR EL SCRIPT
+============================================================
+
+ANTES DE INICIAR EL CHROME DEL EXTRACTOR SE DEBEN CERRAR
+TODOS LOS PROCESOS DE GOOGLE CHROME.
+
+Ejecutar en PowerShell:
+
+    taskkill /F /IM chrome.exe
+
+Esto cerrará todas las ventanas y procesos activos de Chrome.
+
+
+============================================================
+ABRIR EL CHROME DEL EXTRACTOR
+============================================================
+
+Después de cerrar Chrome, ejecutar en PowerShell:
+
+    & "C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222 --user-data-dir="C:\Users\compumarker\Desktop\SCRIPS\EXTRACTOR FB\chrome_debug"
+
+
+IMPORTANTE:
+
+Este Chrome utiliza un perfil independiente:
+
+    chrome_debug
+
+No utilizar el Chrome normal para este proceso.
+
+El perfil se utiliza para mantener la sesión de Facebook
+utilizada por el extractor.
+
+
+============================================================
+INICIAR SESIÓN EN FACEBOOK
+============================================================
+
+Después de abrir el Chrome del extractor:
+
+- Iniciar sesión manualmente en Facebook.
+
+- Si Facebook solicita códigos de verificación o
+  autenticación adicional, completar el proceso normalmente.
+
+- No es necesario introducir la contraseña dentro del script.
+
+- La sesión queda almacenada en el perfil:
+
+    chrome_debug
+
+
+============================================================
+PREPARAR FACEBOOK MARKETPLACE
+============================================================
+
+Una vez iniciada la sesión:
+
+- No es necesario navegar manualmente a la página de
+  publicaciones.
+
+- El script se encargará de abrir o redirigir a:
+
+    https://www.facebook.com/marketplace/you/selling
+
+
+Esta es la sección donde aparecen las publicaciones propias
+de Marketplace.
+
+
+============================================================
+EJECUTAR EL EXTRACTOR
+============================================================
+
+Desde PowerShell, ubicarse dentro de la carpeta del proyecto.
+
+Ejecutar:
+
+    py Facebook_Marketplace_V2.py
+
+
+El script se conectará al Chrome previamente abierto.
+
+Después comenzará a detectar las publicaciones disponibles.
+
+
+============================================================
+DURANTE LA EXTRACCIÓN
+============================================================
+
+- Dejar que el script continúe trabajando.
+
+- El script realizará scroll progresivamente para cargar más
+  publicaciones.
+
+- Las publicaciones nuevas serán procesadas automáticamente.
+
+- El programa puede abrir la publicación para obtener
+  información adicional.
+
+- El script intenta obtener:
+
+    nombre
+    precio
+    disponibilidad
+    SKU
+    listing_id
+    publicado
+
+
+- Los datos se guardan progresivamente en el archivo Excel.
+
+- No cerrar el Chrome mientras el extractor esté funcionando.
+
+
+============================================================
+SI EL SCRIPT SE ESTANCA EN UNA PUBLICACIÓN
+============================================================
+
+En algunas publicaciones Facebook puede tardar en responder
+o el modal de la publicación puede quedar abierto.
+
+Si una publicación se queda abierta o parece que el extractor
+se ha detenido:
+
+- Cerrar únicamente la viñeta/ventana/modal de la publicación.
+
+- NO cerrar Google Chrome.
+
+- NO cerrar la pestaña de Marketplace.
+
+- Después de cerrar la viñeta, el script podrá continuar con
+  las siguientes publicaciones.
+
+
+IMPORTANTE:
+
+El extractor utiliza los modales de Facebook solamente para
+obtener información adicional como SKU, fecha y listing_id.
+
+
+============================================================
+DEJAR FINALIZAR EL PROCESO
+============================================================
+
+Dejar que el script continúe hasta que termine de recorrer
+las publicaciones disponibles.
+
+El extractor realiza scroll y comprueba si aparecen nuevas
+publicaciones.
+
+Cuando ya no encuentra publicaciones nuevas durante varios
+ciclos, finaliza el proceso.
+
+
+============================================================
+ARCHIVO DE RESULTADO
+============================================================
+
+El resultado principal se guarda como:
+
+    Facebook_Marketplace.xlsx
+
+
+Las columnas son:
+
+    nombre
+    precio
+    disponibilidad
+    sku
+    listing_id
+    publicado
+
+
+============================================================
+DESCRIPCIÓN DE LOS CAMPOS
+============================================================
+
+nombre
+
+Nombre de la publicación obtenida desde la tarjeta de
+Marketplace.
+
+
+precio
+
+Precio mostrado por Facebook.
+
+Ejemplo:
+
+    S/ 693
+
+El extractor guarda:
+
+    693
+
+
+disponibilidad
+
+Estado de la publicación.
+
+Valores esperados:
+
+    Disponible
+    Agotado
+
+
+sku
+
+Número de publicación que Facebook muestra asociado a
+"Publicación:".
+
+Ejemplo:
+
+    3023
+    Publicación:
+
+
+listing_id
+
+Identificador de la publicación de Marketplace.
+
+El extractor intenta encontrarlo directamente en el HTML
+de la publicación.
+
+Si no está disponible, utiliza métodos adicionales para
+obtenerlo.
+
+
+publicado
+
+Información sobre la antigüedad de la publicación.
+
+Ejemplos:
+
+    Hace 18 horas
+    Hace 2 días
+    Hace 3 semanas
+
+
+============================================================
+CONSERVACIÓN DE DATOS
+============================================================
+
+El extractor revisa el Excel existente antes de comenzar.
+
+Si una publicación ya existe:
+
+- No vuelve a abrir innecesariamente el detalle.
+- Conserva los datos existentes.
+- Puede completar datos faltantes visibles en la tarjeta.
+
+Esto permite ejecutar nuevamente el extractor sin perder los
+registros obtenidos anteriormente.
+
+
+============================================================
+CHECKPOINT
+============================================================
+
+El programa utiliza un sistema de guardado periódico para
+reducir el riesgo de perder información si el proceso se
+interrumpe.
+
+Archivo utilizado:
+
+    Facebook_Marketplace_checkpoint.xlsx
+
+
+============================================================
+SEGURIDAD
+============================================================
+
+El script NO solicita ni almacena directamente la contraseña
+de Facebook.
+
+La sesión se mantiene en el perfil independiente de Chrome:
+
+    chrome_debug
+
+
+NO compartir este directorio.
+
+NO subir este directorio a Git.
+
+El perfil de Chrome puede contener cookies, sesiones y otros
+datos privados.
+
+
+============================================================
+ARCHIVOS QUE NO DEBEN SUBIRSE A GIT
+============================================================
+
+No subir:
+
+    chrome_debug/
+    Facebook_Marketplace.xlsx
+    Facebook_Marketplace_checkpoint.xlsx
+    Facebook_Marketplace.csv
+
+También evitar subir:
+
+    __pycache__/
+    .venv/
+    *.log
+
+
+Estos archivos deben estar incluidos en:
+
+    .gitignore
+
+
+============================================================
+ARCHIVOS QUE SÍ DEBEN ESTAR EN GIT
+============================================================
+
+Se recomienda mantener versionados:
+
+    Facebook_Marketplace_V2.py
+    DOCUMENTACION.TXT
+    README.md
+    requirements.txt
+    .gitignore
+
+Si se utiliza:
+
+    Formato_reporte.py
+
+también puede mantenerse en Git.
+
+
+============================================================
+DEPENDENCIAS DEL PROYECTO
+============================================================
+
+Las dependencias principales son:
+
+    playwright
+    openpyxl
+
+
+Para instalarlas:
+
+    py -m pip install playwright openpyxl
+
+
+Para instalar Chromium:
+
+    py -m playwright install chromium
+
+
+============================================================
+REINSTALAR EL PROYECTO EN OTRA PC
+============================================================
+
+En una computadora nueva:
+
+- Instalar Python.
+
+- Instalar Google Chrome.
+
+- Descargar/clonar el proyecto.
+
+- Abrir PowerShell en la carpeta del proyecto.
+
+- Instalar las librerías:
+
+    py -m pip install playwright openpyxl
+
+- Instalar Chromium de Playwright:
+
+    py -m playwright install chromium
+
+- Cerrar todos los procesos de Chrome:
+
+    taskkill /F /IM chrome.exe
+
+- Abrir el Chrome del extractor con el comando indicado
+  anteriormente.
+
+- Iniciar sesión en Facebook.
+
+- Ejecutar:
+
+    py Facebook_Marketplace_V2.py
+
+
+============================================================
+PROBLEMAS COMUNES
+============================================================
+
+PROBLEMA:
+No se puede conectar al Chrome.
+
+SOLUCIÓN:
+
+- Comprobar que Chrome fue iniciado con:
+
+    --remote-debugging-port=9222
+
+- Comprobar que Chrome está abierto.
+
+- Comprobar que se está utilizando el perfil:
+
+    chrome_debug
+
+
+------------------------------------------------------------
+
+PROBLEMA:
+El script indica que no puede conectarse.
+
+SOLUCIÓN:
+
+Cerrar Chrome completamente:
+
+    taskkill /F /IM chrome.exe
+
+Volver a iniciar Chrome utilizando el comando del extractor.
+
+
+------------------------------------------------------------
+
+PROBLEMA:
+Facebook solicita iniciar sesión.
+
+SOLUCIÓN:
+
+Iniciar sesión manualmente en el Chrome del extractor.
+
+
+------------------------------------------------------------
+
+PROBLEMA:
+Una publicación queda abierta y parece que el script se
+detuvo.
+
+SOLUCIÓN:
+
+Cerrar únicamente la viñeta/modal de la publicación.
+
+No cerrar Chrome.
+
+El extractor continuará con el proceso.
+
+
+------------------------------------------------------------
+
+PROBLEMA:
+El script no encuentra algunas publicaciones.
+
+SOLUCIÓN:
+
+Facebook puede modificar dinámicamente la estructura de
+Marketplace.
+
+Comprobar primero que las publicaciones sean visibles
+normalmente en la página.
+
+
+============================================================
+IMPORTANTE SOBRE FACEBOOK
+============================================================
+
+Facebook puede modificar la estructura HTML, los elementos
+visuales o el comportamiento de Marketplace.
+
+Por esta razón, el extractor evita depender directamente de
+clases CSS dinámicas.
+
+La detección actual utiliza elementos y atributos del DOM
+como:
+
+    role="button"
+    aria-label
+    img[alt]
+
+El nombre se obtiene principalmente desde la tarjeta de la
+publicación y la información adicional se obtiene desde el
+detalle/modal cuando es necesario.
+
+
+============================================================
+VERSIÓN
+============================================================
+
+Nombre:
+
+    Facebook Marketplace - Extractor V2
+
+Estado:
+
+    VERSIÓN ESTABLE
+
+Archivo principal:
+
+    Facebook_Marketplace_V2.py
