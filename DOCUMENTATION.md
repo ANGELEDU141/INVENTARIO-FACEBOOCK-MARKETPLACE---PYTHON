@@ -189,13 +189,11 @@ PREPARAR FACEBOOK MARKETPLACE
 
 Una vez iniciada la sesión:
 
-- No es necesario navegar manualmente a la página de
-  publicaciones.
+- La lista de productos colocarla en modo tarjetas para poder empezar.
 
 - El script se encargará de abrir o redirigir a:
 
     https://www.facebook.com/marketplace/you/selling
-
 
 Esta es la sección donde aparecen las publicaciones propias
 de Marketplace.
@@ -220,6 +218,11 @@ Después comenzará a detectar las publicaciones disponibles.
 ============================================================
 DURANTE LA EXTRACCIÓN
 ============================================================
+
+- El programa primero contara los productos, para esto hara scroll en la pagina, si el scroll tarda en cargar es posible que de por terminado el conteo , almenos durante esta etapa puedes supervisar que llegue al final del scroll
+
+- Si en el conteo se detiene antes de que carguen en pantalla todos los productos presionar combinacion de teclas "ctrl + c"  deslizar manualmente hasta renderizar todos los productos y ejecutar nuevamente 
+(py Facebook_Marketplace_V2.py)  pegar sin los parentesis.
 
 - Dejar que el script continúe trabajando.
 
@@ -265,6 +268,7 @@ se ha detenido:
 - Después de cerrar la viñeta, el script podrá continuar con
   las siguientes publicaciones.
 
+(para evitar esto, si se tiene que hacer otra actividad, cambiar de ventana , no minimizar directamente el chrome con el extractor, revisar periodicamente el proceso)
 
 IMPORTANTE:
 

@@ -118,16 +118,34 @@ def precios(texto):
     """
     Devuelve todos los precios encontrados.
 
-    S/285S/305 -> ["285", "305"]
+    Ejemplos:
+    S/285S/305      -> ["285", "305"]
+    S/20 347        -> ["20347"]
+    S/16 075        -> ["16075"]
+    S/5 309         -> ["5309"]
+    S/2,099         -> ["2099"]
+    S/1.999         -> ["1999"]
     """
-    return [
-        x.replace(",", "")
-        for x in re.findall(
-            r"S/\s*([\d.,]+)",
-            texto or "",
-            re.I
-        )
-    ]
+
+    encontrados = re.findall(
+        r"S/\s*([\d.,]+(?:[\s\xa0]+[\d.,]+)*)",
+        texto or "",
+        re.I
+    )
+
+    precios_limpios = []
+
+    for x in encontrados:
+        # Eliminar espacios normales y espacios no separables
+        x = re.sub(r"[\s\xa0]+", "", x)
+
+        # Eliminar separadores de miles
+        x = x.replace(",", "")
+        x = x.replace(".", "")
+
+        precios_limpios.append(x)
+
+    return precios_limpios
 
 
 def precio(texto):
